@@ -1,10 +1,10 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
 ![Git](https://img.shields.io/badge/git-%23F05033.svg?style=for-the-badge&logo=git&logoColor=white)
 # Super-Fast-Adversarial-Training
-[![Generic badge](https://img.shields.io/badge/Library-Pytorch-green.svg)](https://shields.io/)
+[![Generic badge](https://img.shields.io/badge/Library-Pytorch-green.svg)](https://pytorch.org/)
 [![Generic badge](https://img.shields.io/badge/Version-alpha-red.svg)](https://shields.io/)
 [![Generic badge](https://img.shields.io/badge/Under-Develop-blue.svg)](https://shields.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/ByungKwanLee/Super-Fast-Adversarial-Training/blob/master/LICENSE)
 ---
 
 This is a PyTorch Implementation code for developing super fast adversarial training.

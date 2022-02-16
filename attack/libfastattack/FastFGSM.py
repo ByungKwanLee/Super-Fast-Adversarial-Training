@@ -38,7 +38,7 @@ class FastFGSM(Attack):
         # Accerlating Gradient
         scaled_loss = self.scaler.scale(cost)
         # Update adversarial images
-        grad = torch.autograd.grad(cost, adv_images,
+        grad = torch.autograd.grad(scaled_loss, adv_images,
                                    retain_graph=False, create_graph=False)[0]
         grad /= scaled_loss / cost
 

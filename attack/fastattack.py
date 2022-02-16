@@ -1,6 +1,3 @@
-import torch
-import torchattacks
-from torchattacks.attack import Attack
 from attack.libfastattack.FastPGD import FastPGD
 from attack.libfastattack.FastFGSM import FastFGSM
 from attack.libfastattack.FastFGSMTrain import FastFGSMTrain

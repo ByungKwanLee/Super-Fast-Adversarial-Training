@@ -50,6 +50,29 @@ This library is developed based on the well-known package of torchattacks [[link
 [//]: # (* AutoAttack &#40;[AA]&#40;https://arxiv.org/abs/2003.01690&#41;&#41;)
 [//]: # (* Fast Adaptive Boundary &#40;[FAB]&#40;http://proceedings.mlr.press/v119/croce20a.html&#41;&#41;)
 
+
+---
+## Environment Setting
+
+### Please check below settings to successfully run this code. If not, follow step by step during filling the checklist in.
+
+- [ ] To utilize FFCV [[link]](https://github.com/libffcv/ffcv), you should install it on conda virtual environment.
+I use python version 3.8, pytorch 1.7.1, torchvision 0.8.2, and cuda 10.1. For more different version, you can refer to PyTorch official site [[link]](https://pytorch.org/get-started/previous-versions/). 
+
+> conda create -y -n ffcv python=3.8 cupy pkg-config compilers libjpeg-turbo opencv pytorch==1.7.1 torchvision==0.8.2 cudatoolkit=10.1 numba -c pytorch -c conda-forge
+
+- [ ] Activate the created environment by conda
+
+> conda activate ffcv
+
+- [ ] And, it would be better to install cudnn to more accelerate GPU. (Optional)
+
+> conda install cudnn -c conda-forge
+
+- [ ] To install FFCV, you should download it in pip and install torchattacks [[link]](https://github.com/Harry24k/adversarial-attacks-pytorch) to run adversarial attack.
+
+> pip install ffcv torchattacks==3.1.0
+
 ---
 
 ## Available Datasets
@@ -69,7 +92,9 @@ This library is developed based on the well-known package of torchattacks [[link
 * [DenseNet](https://arxiv.org/abs/1608.06993) *(model/dense.py)*
 ---
 
-# How to run
+## How to run
+
+### After making completion of environment settings, then you can follow how to run below.
 
 ---
 
@@ -138,3 +163,13 @@ parser.add_argument('--attack', default='pgd', type=str)
 parser.add_argument('--eps', default=0.03, type=float)
 parser.add_argument('--steps', default=10, type=int)
 ```
+---
+
+## To-do
+
+I have plans to make a variety of functions to be a standard framework for adversarial training. 
+
+- [ ] Many Compatible Adversarial Attacks and Defenses
+- [ ] Super Fast Evaluation and Validating its Compatibility
+- [ ] Re-Arrangement of class and function for code readability
+- [ ] Providing Checkpoints per dataset and model to reduce your own time

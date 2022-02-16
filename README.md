@@ -165,6 +165,7 @@ parser.add_argument('--steps', default=10, type=int)
 ```
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ---
 
 ## To-do
@@ -175,6 +176,8 @@ I have plans to make a variety of functions to be a standard framework for adver
 - [ ] Super Fast Evaluation and Validating its Compatibility
 - [ ] Re-Arrangement of class and function for code readability
 - [ ] Providing Checkpoints per dataset and model to reduce your own time
+=======
+>>>>>>> 8f32078c886dea0d035b341af813d8cd05bad882
 =======
 >>>>>>> 8f32078c886dea0d035b341af813d8cd05bad882
 =======

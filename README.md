@@ -133,6 +133,8 @@ save_data_for_beton(dataset=args.dataset)
 
 ```python
 # model parameter
+import argparse
+parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='imagenet', type=str)
 parser.add_argument('--network', default='resnet', type=str)
 parser.add_argument('--depth', default=50, type=int)
@@ -150,6 +152,8 @@ or
 
 ```python
 # model parameter
+import argparse
+parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default='imagenet', type=str)
 parser.add_argument('--network', default='resnet', type=str)
 parser.add_argument('--depth', default=18, type=int)

@@ -9,7 +9,7 @@
 
 This is a PyTorch Implementation code for developing super fast adversarial training.
 This code is combined with below state-of-the-art technologies for
-accelarating adversarial attacks and defenses with Deep Neural Networks
+accelerating adversarial attacks and defenses with Deep Neural Networks
 on Volta GPU architecture.
 
 - [x] Distributed Data Parallel [[link]](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)
@@ -72,6 +72,10 @@ I use python version 3.8, pytorch 1.7.1, torchvision 0.8.2, and cuda 10.1. For m
 - [ ] To install FFCV, you should download it in pip and install torchattacks [[link]](https://github.com/Harry24k/adversarial-attacks-pytorch) to run adversarial attack.
 
 > pip install ffcv torchattacks==3.1.0
+
+- [ ] To guarantee the execution of this code, please additionally install library in requirements.txt (matplotlib, tqdm)
+
+> pip install -r requirements.txt
 
 ---
 

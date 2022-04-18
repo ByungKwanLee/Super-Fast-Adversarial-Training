@@ -1,18 +1,11 @@
-# Future import build
-from __future__ import print_function
-
 # Import built-in module
-import os
 import argparse
+import warnings
+warnings.filterwarnings(action='ignore')
 
 # Import torch
-import torch
-import torchvision
-import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
-
-from tqdm import tqdm
 
 # Import Custom Utils
 from utils.fast_network_utils import get_network
@@ -34,206 +27,219 @@ torch.autograd.profiler.profile(False)
 # fetch args
 parser = argparse.ArgumentParser()
 
-
 # model parameter
-parser.add_argument('--dataset', default='imagenet', type=str)
-parser.add_argument('--network', default='resnet', type=str)
-parser.add_argument('--depth', default=18, type=int)
+parser.add_argument('--dataset', default='svhn', type=str)
+parser.add_argument('--network', default='wide', type=str)
+parser.add_argument('--depth', default=34, type=int)
 parser.add_argument('--gpu', default='0,1,2,3,4', type=str)
+parser.add_argument('--port', default='12356', type=str)
 
 # learning parameter
 parser.add_argument('--learning_rate', default=0.1, type=float)
 parser.add_argument('--weight_decay', default=0.0002, type=float)
-parser.add_argument('--batch_size', default=1024, type=float)
-parser.add_argument('--test_batch_size', default=512, type=float)
-parser.add_argument('--epoch', default=60, type=int)
+parser.add_argument('--batch_size', default=128, type=float)
+parser.add_argument('--test_batch_size', default=256, type=float)
+parser.add_argument('--epoch', default=30, type=int)
 
-# attack parameter
+# attack parameter only for CIFAR-10 and SVHN
 parser.add_argument('--attack', default='pgd', type=str)
 parser.add_argument('--eps', default=0.03, type=float)
 parser.add_argument('--steps', default=10, type=int)
 args = parser.parse_args()
 
-# multi-process
-ngpus_per_node = len(args.gpu.split(','))
+# the number of gpus for multi-process
+gpu_list = list(map(int, args.gpu.split(',')))
+ngpus_per_node = len(gpu_list)
 
 # cuda visible devices
 os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-
-# Printing configurations
-print_configuration(args)
+os.environ['MASTER_ADDR'] = 'localhost'
+os.environ['MASTER_PORT'] = args.port
 
 # global best_acc
 best_acc = 0
 
+# Mix Training
+scaler = GradScaler()
 
-def get_resolution(epoch, min_res, max_res, end_ramp, start_ramp):
-    assert min_res <= max_res
-
-    if epoch <= start_ramp:
-        return min_res
-
-    if epoch >= end_ramp:
-        return max_res
-
-    # otherwise, linearly interpolate to the nearest multiple of 32
-    interp = np.interp([epoch], [start_ramp, end_ramp], [min_res, max_res])
-    final_res = int(np.round(interp[0] / 32)) * 32
-    return final_res
-
-def train(epoch, net, trainloader, optimizer, criterion, lr_scheduler, scaler, attack, gpu):
-    print('\nEpoch: %d' % epoch)
+def train(net, trainloader, optimizer, lr_scheduler, scaler, attack):
     net.train()
     train_loss = 0
     correct = 0
     total = 0
 
-    res = get_resolution(epoch, 160, 192, 13, 11)
-    resize = torchvision.transforms.Resize((res, res))
-
-    lr_scheduler(optimizer, epoch)
-    desc = ('[Train/LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
-            (lr_scheduler.get_lr(optimizer), 0, 0, correct, total))
-
+    desc = ('[Train/LR=%.3f] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
+            (lr_scheduler.get_lr()[0], 0, 0, correct, total))
 
     prog_bar = tqdm(enumerate(trainloader), total=len(trainloader), desc=desc, leave=True)
     for batch_idx, (inputs, targets) in prog_bar:
-        inputs, targets = inputs.to(gpu), targets.to(gpu)
-        inputs = resize(inputs)
+        inputs, targets = inputs.cuda(), targets.cuda()
         inputs = attack(inputs, targets)
-        optimizer.zero_grad()
-
 
         # Accerlating forward propagation
+        optimizer.zero_grad()
         with autocast():
             outputs = net(inputs)
-            loss = criterion(outputs, targets)
+            loss = F.cross_entropy(outputs, targets)
 
         # Accerlating backward propagation
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
+        # scheduling for Cyclic LR
+        lr_scheduler.step()
+
         train_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        desc = ('[Train/LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
-                (lr_scheduler.get_lr(optimizer), train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+        desc = ('[Train/LR=%.3f] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
+                (lr_scheduler.get_lr()[0], train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         prog_bar.set_description(desc, refresh=True)
 
 
 
-def test(epoch, net, testloader, optimizer, criterion, lr_scheduler, attack, gpu):
+def test(net, testloader, attack, rank):
     global best_acc
     net.eval()
     test_loss = 0
     correct = 0
     total = 0
-    desc = ('[Test/LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (lr_scheduler.get_lr(optimizer), test_loss/(0+1), 0, correct, total))
+    desc = ('[Test/Clean] Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (test_loss/(0+1), 0, correct, total))
 
-    prog_bar = tqdm(enumerate(testloader), total=len(testloader), desc=desc, leave=True)
+    prog_bar = tqdm(enumerate(testloader), total=len(testloader), desc=desc, leave=False)
     for batch_idx, (inputs, targets) in prog_bar:
-        inputs = attack(inputs, targets)
-        inputs, targets = inputs.to(gpu), targets.to(gpu)
+        inputs, targets = inputs.cuda(), targets.cuda()
 
         # Accerlating forward propagation
         with autocast():
             outputs = net(inputs)
-            loss = criterion(outputs, targets)
+            loss = F.cross_entropy(outputs, targets)
 
         test_loss += loss.item()
         _, predicted = outputs.max(1)
         total += targets.size(0)
         correct += predicted.eq(targets).sum().item()
 
-        desc = ('[Test/LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                % (lr_scheduler.get_lr(optimizer), test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+        desc = ('[Test/Clean] Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         prog_bar.set_description(desc, refresh=True)
 
-    # Save checkpoint.
-    acc = 100.*correct/total
+    # Save clean acc.
+    clean_acc = 100. * correct / total
 
+    test_loss = 0
+    correct = 0
+    total = 0
+
+    desc = ('[Test/PGD] Loss: %.3f | Acc: %.3f%% (%d/%d)'
+            % (test_loss / (0 + 1), 0, correct, total))
+
+    prog_bar = tqdm(enumerate(testloader), total=len(testloader), desc=desc, leave=False)
+    for batch_idx, (inputs, targets) in prog_bar:
+        inputs = attack(inputs, targets)
+        inputs, targets = inputs.cuda(), targets.cuda()
+
+        # Accerlating forward propagation
+        with autocast():
+            outputs = net(inputs)
+            loss = F.cross_entropy(outputs, targets)
+
+        test_loss += loss.item()
+        _, predicted = outputs.max(1)
+        total += targets.size(0)
+        correct += predicted.eq(targets).sum().item()
+
+        desc = ('[Test/PGD] Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+        prog_bar.set_description(desc, refresh=True)
+
+    # Save adv acc.
+    adv_acc = 100. * correct / total
+
+    # compute acc
+    acc = (clean_acc + adv_acc)/2
+
+    rprint('Current Accuracy is {:.2f}/{:.2f}!!'.format(clean_acc, adv_acc), rank)
 
     if acc > best_acc:
-        print('Saving..')
         state = {
             'net': net.state_dict(),
-            'acc': acc,
-            'epoch': epoch,
-            'loss': loss,
-            'args': args
         }
         if not os.path.isdir('checkpoint'):
             os.mkdir('checkpoint')
         if not os.path.isdir('checkpoint/pretrain'):
             os.mkdir('checkpoint/pretrain')
 
-        if gpu == int(args.gpu.split(',')[0]):
+        best_acc = acc
+        if rank == 0:
             torch.save(state, './checkpoint/pretrain/%s/%s_adv_%s%s_best.t7' % (args.dataset, args.dataset,
-                                                                         args.network,
-                                                                         args.depth))
-            print('./checkpoint/pretrain/%s/%s_adv_%s%s_best.t7' % (args.dataset, args.dataset,
-                                                                         args.network,
-                                                                         args.depth))
-            best_acc = acc
+                                                                                args.network,
+                                                                                args.depth))
+            print('Saving~ ./checkpoint/pretrain/%s/%s_adv_%s%s_best.t7' % (args.dataset, args.dataset,
+                                                                            args.network,
+                                                                            args.depth))
 
-def main_worker(gpu, ngpus_per_node=ngpus_per_node):
 
-    print("Use GPU: {} for training".format(gpu))
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    dist.init_process_group(backend='nccl', world_size=ngpus_per_node, rank=gpu)
-    torch.cuda.set_device(gpu)
+def main_worker(rank, ngpus_per_node=ngpus_per_node):
 
-    print('==> Making model..')
+    # print configuration
+    print_configuration(args, rank)
+
+    # setting gpu id of this process
+    torch.cuda.set_device(rank)
+
+    # DDP environment settings
+    print("Use GPU: {} for training".format(gpu_list[rank]))
+    dist.init_process_group(backend='nccl', world_size=ngpus_per_node, rank=rank)
+
     # init model and Distributed Data Parallel
     net = get_network(network=args.network,
                       depth=args.depth,
-                      dataset=args.dataset,
-                      gpu=gpu)
-    net = net.to(memory_format=torch.channels_last).to(gpu)
-    net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[gpu])
+                      dataset=args.dataset)
+    net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
+    net = net.to(memory_format=torch.channels_last).cuda()
+    net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[rank], output_device=[rank])
 
     # fast init dataloader
-    trainloader, testloader = get_fast_dataloader(dataset=args.dataset,
+    trainloader, testloader, decoder = get_fast_dataloader(dataset=args.dataset,
                                                   train_batch_size=args.batch_size,
-                                                  test_batch_size=args.test_batch_size, gpu=gpu)
+                                                  test_batch_size=args.test_batch_size)
 
     # Load Plain Network
-    # print('==> Loading Plain checkpoint..')
-    # assert os.path.isdir('checkpoint/pretrain'), 'Error: no checkpoint directory found!'
-    # checkpoint = torch.load('checkpoint/pretrain/%s/%s_%s%s_best.t7' % (args.dataset, args.dataset, args.network, args.depth))
-    # print('Loaded checkpoint : checkpoint/pretrain/%s/%s_%s%s_best.t7' % (args.dataset, args.dataset, args.network, args.depth))
-    # net.load_state_dict(checkpoint['net'])
+    checkpoint_name = 'checkpoint/pretrain/%s/%s_%s%s_best.t7' % (args.dataset, args.dataset, args.network, args.depth)
+    checkpoint = torch.load(checkpoint_name, map_location=torch.device(torch.cuda.current_device()))
+    net.load_state_dict(checkpoint['net'])
+    rprint(f'==> {checkpoint_name}', rank)
+    rprint('==> Successfully Loaded Standard checkpoint..', rank)
 
     # Attack loader
-    if args.dataset == 'imagenet':
-        print('Fast FGSM training')
-        attack = attack_loader(net=net, attack='fgsm_train', eps=args.eps, steps=args.steps, dataset=args.dataset)
+    if args.dataset == 'imagenet' or args.dataset == 'tiny':
+        rprint('Fast FGSM training', rank)
+        attack = attack_loader(net=net, attack='fgsm_train', eps=2/255 if args.dataset == 'imagenet' else 0.03, steps=args.steps)
     else:
-        print('PGD training')
-        attack = attack_loader(net=net, attack=args.attack, eps=args.eps, steps=args.steps, dataset=args.dataset)
+        rprint('PGD training', rank)
+        attack = attack_loader(net=net, attack=args.attack, eps=args.eps, steps=args.steps)
 
     # init optimizer and lr scheduler
     optimizer = optim.SGD(net.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=args.weight_decay)
-    lr_schedule = {0: args.learning_rate,
-                   int(args.epoch * 0.5): args.learning_rate * 0.1,
-                   int(args.epoch * 0.75): args.learning_rate * 0.01}
-    lr_scheduler = PresetLRScheduler(lr_schedule)
-    scaler = GradScaler()
+    lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0, max_lr=args.learning_rate,
+    step_size_up=5 * len(trainloader) if args.dataset != 'imagenet' else 2 * len(trainloader),
+    step_size_down=(args.epoch - 5) * len(trainloader) if args.dataset != 'imagenet' else (args.epoch - 2) * len(trainloader))
 
-    # init criterion
-    criterion = nn.CrossEntropyLoss()
+    # training and testing
+    for epoch in range(args.epoch):
+        rprint('\nEpoch: %d' % epoch, rank)
+        if args.dataset == "imagenet":
+            res = get_resolution(epoch=epoch, min_res=160, max_res=192, end_ramp=25, start_ramp=18)
+            decoder.output_size = (res, res)
+        train(net, trainloader, optimizer, lr_scheduler, scaler, attack)
+        test(net, testloader, attack, rank)
 
-    start_epoch = 0
-
-    for epoch in range(start_epoch, args.epoch):
-        train(epoch, net, trainloader, optimizer, criterion, lr_scheduler, scaler, attack, gpu)
-        test(epoch, net, testloader, optimizer, criterion, lr_scheduler, attack, gpu)
-
+    # destroy process
     dist.destroy_process_group()
 
 def run():

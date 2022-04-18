@@ -1,16 +1,26 @@
 import torch
-import torch.nn as nn
 from torch.cuda.amp import GradScaler, autocast
 from torchattacks.attack import Attack
 
 
 class FastFGSMTrain(Attack):
 
-    def __init__(self, model, eps=0.007):
+    def __init__(self, model, eps):
         super().__init__("FastFGSMTrain", model)
         self.eps = eps
         self._supported_mode = ['default', 'targeted']
         self.scaler = GradScaler()
+        self.alpha = self.return_alpha()
+
+    def return_alpha(self):
+        self.child = []
+        for name, child in self.model.module.named_children():
+            self.child.append(child)
+
+        if self.child[-1].out_features > 10:
+            return 2.5
+        else:
+            return 1.25
 
     def forward(self, images, labels):
 
@@ -39,13 +49,12 @@ class FastFGSMTrain(Attack):
             else:
                 cost = loss(outputs, labels)
 
-        # Accerlating Gradient
+        # Accelerating Gradient
         scaled_loss = self.scaler.scale(cost)
         # Update adversarial images
         grad = torch.autograd.grad(scaled_loss, adv_images,
                                    retain_graph=False, create_graph=False)[0]
-        grad /= scaled_loss / cost
 
-        adv_images_ = adv_images.detach() + 1.25 * self.eps*grad.sign()
+        adv_images_ = adv_images.detach() + self.alpha * self.eps*grad.sign()
         delta = torch.clamp(adv_images_ - images, min=-self.eps, max=self.eps)
         return torch.clamp(images + delta, min=0, max=1).detach()

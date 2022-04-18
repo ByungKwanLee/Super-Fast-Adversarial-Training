@@ -1,22 +1,14 @@
 import os
-import torchvision
 import numpy as np
 import matplotlib.pyplot as plt
 
-def get_resolution(epoch, min_res, max_res, end_ramp, start_ramp):
-    assert min_res <= max_res
+def rprint(str, rank):
+    if rank==0:
+        print(str)
 
-    if epoch <= start_ramp:
-        return torchvision.transforms.Resize((min_res, min_res))
-
-    if epoch >= end_ramp:
-        return torchvision.transforms.Resize((max_res, max_res))
-
-    # otherwise, linearly interpolate to the nearest multiple of 32
-    interp = np.interp([epoch], [start_ramp, end_ramp], [min_res, max_res])
-    final_res = int(np.round(interp[0] / 32)) * 32
-
-    return torchvision.transforms.Resize((final_res, final_res))
+def check_dir(dir_path):
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -27,7 +19,7 @@ def str2bool(v):
         assert False
 
 def imshow(img, norm=False):
-    img = img[0].cpu().numpy()
+    img = img.cpu().numpy()
     plt.imshow(np.transpose(np.array(img / 255 if norm else img, dtype=np.float32), (1, 2, 0)))
     plt.show()
 
@@ -43,61 +35,50 @@ def makedirs(filename):
     if not os.path.exists(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename))
 
-def print_configuration(args):
+def print_configuration(args, rank):
     dict = vars(args)
-    print('------------------Configurations------------------')
-    for key in dict.keys():
-        print("{}: {}".format(key, dict[key]))
-    print('-------------------------------------------------')
-
-def KLDivergence(q, p):
-    kld = q * (q / p).log()
-    return kld.sum(dim=1)
-
-from pprint import pprint
-
-class StairCaseLRScheduler(object):
-    def __init__(self, start_at, interval, decay_rate):
-        self.start_at = start_at
-        self.interval = interval
-        self.decay_rate = decay_rate
-
-    def __call__(self, optimizer, iteration):
-        start_at = self.start_at
-        interval = self.interval
-        decay_rate = self.decay_rate
-        if (start_at >= 0) \
-                and (iteration >= start_at) \
-                and (iteration + 1) % interval == 0:
-            for param_group in optimizer.param_groups:
-                param_group['lr'] *= decay_rate
-                print('[%d]Decay lr to %f' % (iteration, param_group['lr']))
-
-    @staticmethod
-    def get_lr(optimizer):
-        for param_group in optimizer.param_groups:
-            lr = param_group['lr']
-            return lr
+    if rank == 0:
+        print('------------------Configurations------------------')
+        for key in dict.keys():
+            print("{}: {}".format(key, dict[key]))
+        print('-------------------------------------------------')
 
 
-class PresetLRScheduler(object):
-    """Using a manually designed learning rate schedule rules.
-    """
-    def __init__(self, decay_schedule):
-        # decay_schedule is a dictionary
-        # which is for specifying iteration -> lr
-        self.decay_schedule = decay_schedule
-        print('=> Using a preset learning rate schedule:')
-        pprint(decay_schedule)
-        self.for_once = True
+# attack loader
+from attack.fastattack import attack_loader
+from tqdm import tqdm
+def test_robustness(net, testloader, criterion, attack_list, rank):
+    net.eval()
+    test_loss = 0
 
-    def __call__(self, optimizer, iteration):
-        for param_group in optimizer.param_groups:
-            lr = self.decay_schedule.get(iteration, param_group['lr'])
-            param_group['lr'] = lr
+    attack_module = {}
+    for attack_name in attack_list:
+        attack_module[attack_name] = attack_loader(net=net, attack=attack_name, eps=0.03, steps=30) \
+                                                                                if attack_name != 'plain' else None
 
-    @staticmethod
-    def get_lr(optimizer):
-        for param_group in optimizer.param_groups:
-            lr = param_group['lr']
-            return lr
+    for key in attack_module:
+        total = 0
+        correct = 0
+        prog_bar = tqdm(enumerate(testloader), total=len(testloader), leave=False)
+        for batch_idx, (inputs, targets) in prog_bar:
+            inputs, targets = inputs.cuda(), targets.cuda()
+            if key != 'plain':
+                inputs = attack_module[key](inputs, targets)
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
+
+            test_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += targets.size(0)
+            correct += predicted.eq(targets).sum().item()
+
+            desc = ('[Test/%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                    % (key, test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+            prog_bar.set_description(desc, refresh=True)
+
+            # fast eval
+            if (key == 'auto') or (key == 'fab'):
+                if batch_idx >= int(len(testloader) * 0.3):
+                    break
+
+        rprint(f'{key}: {100. * correct / total:.2f}%', rank)

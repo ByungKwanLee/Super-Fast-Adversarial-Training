@@ -1,9 +1,7 @@
 from typing import List
-import numpy as np
 
 import torch
 import torchvision
-import torchvision.transforms as transforms
 
 from ffcv.fields import IntField, RGBImageField
 from ffcv.fields.decoders import IntDecoder, SimpleRGBImageDecoder
@@ -47,12 +45,12 @@ def save_data_for_beton(dataset, root='../data'):
 
             writer = DatasetWriter(f'/mnt/hard1/lbk/{dataset}/{dataset}_{name}.beton', {
                 'image': RGBImageField(write_mode='jpg',
-                                       max_resolution=224,
-                                       compress_probability=0.50,
-                                       jpeg_quality=50),
+                                       max_resolution=256,
+                                       compress_probability=0.5,
+                                       jpeg_quality=90),
                 'label': IntField(),
-            }, num_workers=96)
-            writer.from_indexed_dataset(ds, chunksize=400)
+            }, num_workers=16)
+            writer.from_indexed_dataset(ds, chunksize=100)
 
     else:
         # for small dataset
@@ -68,10 +66,11 @@ def save_data_for_beton(dataset, root='../data'):
             writer.from_indexed_dataset(ds)
 
 
-def get_fast_dataloader(dataset, train_batch_size, test_batch_size, gpu, num_workers=20):
-    this_device = 'cuda:'+str(gpu)
+def get_fast_dataloader(dataset, train_batch_size, test_batch_size, num_workers=20, dist=True):
 
-    img_size = 0
+    gpu = f'cuda:{torch.cuda.current_device()}'
+    decoder = None
+
     if dataset == 'cifar10':
         mean = torch.tensor([0.4914, 0.4822, 0.4465])*255
         img_size = 32
@@ -85,8 +84,13 @@ def get_fast_dataloader(dataset, train_batch_size, test_batch_size, gpu, num_wor
         mean = torch.tensor([0.48024578664982126, 0.44807218089384643, 0.3975477478649648])*255
         img_size = 64
     if dataset == 'imagenet':
-        mean = torch.tensor([0.485, 0.456, 0.406])*255
-        img_size = 224
+
+        # fix size
+        init_size = 160
+        orgin_size = 256
+        test_size = 224
+
+        decoder = RandomResizedCropRGBImageDecoder((init_size, init_size))
 
         paths = {
             'train': '/mnt/hard1/lbk/imagenet/imagenet_train.beton',
@@ -96,25 +100,26 @@ def get_fast_dataloader(dataset, train_batch_size, test_batch_size, gpu, num_wor
         loaders = {}
         for name in ['train', 'test']:
             if name == 'train':
-                image_pipeline: List[Operation] = [RandomResizedCropRGBImageDecoder((img_size, img_size)),
+                image_pipeline: List[Operation] = [decoder,
                                                    RandomHorizontalFlip()]
             else:
-                image_pipeline: List[Operation] = [CenterCropRGBImageDecoder((img_size, img_size), 1)]
+                image_pipeline: List[Operation] = [CenterCropRGBImageDecoder((test_size, test_size), test_size/orgin_size)]
 
-            label_pipeline: List[Operation] = [IntDecoder(), ToTensor(), Squeeze(), ToDevice(torch.device(this_device), non_blocking=True)]
+            label_pipeline: List[Operation] = [IntDecoder(), ToTensor(), Squeeze(), ToDevice_modified(torch.device(gpu), non_blocking=True)]
 
             image_pipeline.extend([
                 ToTensor(),
-                ToDevice(torch.device(this_device), non_blocking=True),
+                ToDevice_modified(torch.device(gpu), non_blocking=True),
                 ToTorchImage(),
                 Normalize_and_Convert(torch.float16, True)
             ])
 
-            ordering = OrderOption.RANDOM if name == 'train' else OrderOption.SEQUENTIAL
+            order = OrderOption.RANDOM if name == 'train' else OrderOption.SEQUENTIAL
+            #order = OrderOption.RANDOM
 
             loaders[name] = Loader(paths[name], batch_size=train_batch_size if name == 'train' else test_batch_size,
-                                   num_workers=num_workers, order=ordering, drop_last=(name == 'train'), os_cache=True,
-                                   distributed=True, pipelines={'image': image_pipeline, 'label': label_pipeline},
+                                   num_workers=num_workers, order=order, drop_last=(name == 'train'), os_cache=True,
+                                   distributed=dist, pipelines={'image': image_pipeline, 'label': label_pipeline},
                                    seed = 0)
     else:
         # for small dataset
@@ -123,29 +128,32 @@ def get_fast_dataloader(dataset, train_batch_size, test_batch_size, gpu, num_wor
             'test': f'../ffcv_data/{dataset}/{dataset}_test.beton'
         }
 
-
         loaders = {}
         for name in ['train', 'test']:
             image_pipeline: List[Operation] = [SimpleRGBImageDecoder()]
-            label_pipeline: List[Operation] = [IntDecoder(), ToTensor(), ToDevice(torch.device(this_device)), Squeeze()]
+            label_pipeline: List[Operation] = [IntDecoder(), ToTensor(), ToDevice_modified(torch.device(gpu)), Squeeze()]
             if name == 'train':
                 image_pipeline.extend([
                     RandomHorizontalFlip(),
-                    RandomTranslate(padding=int(img_size/16.), fill=tuple(map(int, mean))),
+                    RandomTranslate(padding=int(img_size / 8.), fill=tuple(map(int, mean))),
                 ])
             image_pipeline.extend([
                 ToTensor(),
-                ToDevice(torch.device(this_device), non_blocking=True),
+                ToDevice_modified(torch.device(gpu), non_blocking=True),
                 ToTorchImage(),
                 Normalize_and_Convert(torch.float16, True)
             ])
 
-            ordering = OrderOption.RANDOM if name == 'train' else OrderOption.SEQUENTIAL
+            order = OrderOption.RANDOM if name == 'train' else OrderOption.SEQUENTIAL
 
             loaders[name] = Loader(paths[name], batch_size=train_batch_size if name == 'train' else test_batch_size,
-                                num_workers=num_workers, order=ordering, drop_last=(name == 'train'),
+                                num_workers=num_workers, order=order, drop_last=(name == 'train'),
                                    pipelines={'image': image_pipeline, 'label': label_pipeline})
-    return loaders['train'], loaders['test']
+
+
+    return loaders['train'], loaders['test'], decoder
+
+
 
 
 
@@ -173,3 +181,24 @@ class Normalize_and_Convert(Operation):
 
     def declare_state_and_memory(self, previous_state: State) -> Tuple[State, Optional[AllocationQuery]]:
         return replace(previous_state, dtype=self.target_dtype), None
+
+from ffcv.transforms import ToDevice
+class ToDevice_modified(ToDevice):
+    def __init__(self, device, non_blocking=True):
+        super(ToDevice_modified, self).__init__(device, non_blocking)
+
+    def generate_code(self):
+        def to_device(inp, dst):
+            if len(inp.shape) == 4:
+                if inp.is_contiguous(memory_format=torch.channels_last):
+                    dst = dst.reshape(inp.shape[0], inp.shape[2], inp.shape[3], inp.shape[1])
+                    dst = dst.permute(0, 3, 1, 2)
+
+            if len(inp.shape) == 0:
+                inp = inp.unsqueeze(0)
+
+            dst = dst[:inp.shape[0]]
+            dst.copy_(inp, non_blocking=self.non_blocking)
+            return dst
+
+        return to_device

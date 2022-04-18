@@ -40,16 +40,17 @@ If you find this work helpful, please cite it as:
 ## Library for Fast Adversarial Attacks
 This library is developed based on the well-known package of torchattacks [[link]](https://github.com/Harry24k/adversarial-attacks-pytorch) due to its simple scalability.
 
-**Under Developement (Current Available Attacks Below)**
+**Current Available Attacks Below**
 
 * Fast Gradient Sign Method ([FGSM](https://arxiv.org/abs/1412.6572))
+* Basic Iterative Method ([BIM](https://arxiv.org/abs/1611.01236))
 * Projected Gradient Descent ([PGD](https://arxiv.org/abs/1706.06083))
-
-[//]: # (* Basic Iterative Method &#40;[BIM]&#40;https://arxiv.org/abs/1611.01236&#41;&#41;)
-[//]: # (* Carlini & Wagner &#40;[CW]&#40;https://arxiv.org/abs/1608.04644&#41;&#41;)
-[//]: # (* AutoAttack &#40;[AA]&#40;https://arxiv.org/abs/2003.01690&#41;&#41;)
-[//]: # (* Fast Adaptive Boundary &#40;[FAB]&#40;http://proceedings.mlr.press/v119/croce20a.html&#41;&#41;)
-
+* Momentum Iterative Method ([MIM](https://arxiv.org/abs/1710.06081))
+* Carlini & Wagner ([CW](https://arxiv.org/abs/1608.04644))
+* Fast Adaptive Boundary ([FAB](https://arxiv.org/abs/1907.02044))
+* Auto-PGD ([AP](https://arxiv.org/abs/2003.01690))
+* Difference of Logits Ratio ([DLR](https://arxiv.org/abs/2003.01690))
+* Auto-Attack ([AA](https://arxiv.org/abs/2003.01690))
 
 ---
 ## Environment Setting

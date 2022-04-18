@@ -178,8 +178,6 @@ parser.add_argument('--steps', default=10, type=int)
 
 I have plans to make a variety of functions to be a standard framework for adversarial training. 
 
-- [ ] Many Compatible Adversarial Attacks and Defenses
-- [ ] Super Fast Evaluation and Validating its Compatibility
-- [ ] Re-Arrangement of class and function for code readability
-- [ ] Providing Checkpoints per dataset and model to reduce your own time
+- [x] Many Compatible Adversarial Attacks
+- [ ] Many Compatible Adversarial Defenses
 

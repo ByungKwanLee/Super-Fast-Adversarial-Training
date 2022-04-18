@@ -29,9 +29,8 @@ If you find this work helpful, please cite it as:
 ```
 @software{SuperFastAT_ByungKwanLee_2022,
   author = {Byung-Kwan Lee},
-  title = {Super-Fast-Adversarial-Training},
-  url = {https://github.com/ByungKwanLee/Super-Fast-Adversarial-Training},
-  version = {alpha},
+  title = {Super Fast Adversarial Training with Distributed Data Parallel and Mixed Precision},
+  howpublished = {\url{https://github.com/ByungKwanLee/Super-Fast-Adversarial-Training}},
   year = {2022}
 }
 ```
